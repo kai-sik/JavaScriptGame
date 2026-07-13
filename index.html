@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2D弾幕シューティング - 基礎テンプレート</title>
+
+<style>
+/* ======================================================================
+   CSS：見た目のスタイリング
+   ======================================================================
+   ここでは「色」「フォント」などをCSS変数（:root内）にまとめています。
+   色を変えたいときは、まずここの値だけを書き換えれば全体に反映されます。
+====================================================================== */
+:root {
+  /* --- 配色トークン（テーマカラー） --- */
+  --color-bg-deep:    #05060f; /* ページ全体の一番深い背景色 */
+  --color-bg-panel:   #0d1230; /* ゲーム枠パネルの背景色 */
+  --color-accent-cyan:    #4fe3ff; /* メインアクセント：自機やHUDの色 */
+  --color-accent-magenta: #ff3d81; /* サブアクセント：敵弾などの色 */
+  --color-accent-gold:    #ffd166; /* サブアクセント：スコアや強調文字 */
+  --color-text:      #eef1f8; /* 通常の文字色 */
+  --color-text-dim:  #8891b0; /* 補足説明などの薄い文字色 */
+
+  /* --- フォントトークン --- */
+  --font-display: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; /* タイトルなど大きい文字 */
+  --font-mono: "Consolas", "SF Mono", "Menlo", monospace; /* スコアなどHUD風の文字 */
+}
+
+/* 全体のリセット（デフォルトの余白などを消す） */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 24px;
+
+  color: var(--color-text);
+  font-family: var(--font-display);
+
+  /* 背景色 + 小さな点を散りばめた「星空」風の背景パターン */
+  background-color: var(--color-bg-deep);
+  background-image:
+    radial-gradient(1px 1px at 20px 30px,  #ffffff 100%, transparent),
+    radial-gradient(1px 1px at 90px 80px,  #ffffff 100%, transparent),
+    radial-gradient(1.5px 1.5px at 150px 50px, #ffffff 100%, transparent),
+    radial-gradient(1px 1px at 200px 120px, #ffffff 100%, transparent),
+    radial-gradient(1px 1px at 250px 20px,  #ffffff 100%, transparent),
+    radial-gradient(1px 1px at 40px 160px,  #ffffff 100%, transparent);
+  background-repeat: repeat;
+  background-size: 300px 300px;
+  animation: star-drift 90s linear infinite; /* 星がゆっくり流れるアニメーション */
+}
+
+/* 星空が縦にゆっくり流れて見えるアニメーション */
+@keyframes star-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 0 900px; }
+}
+
+/* ページ上部のタイトル部分 */
+.game-title {
+  text-align: center;
+}
+
+.game-title h1 {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  /* 文字にグラデーションをかけて発光しているように見せる */
+  background: linear-gradient(90deg, var(--color-accent-cyan), var(--color-accent-magenta));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.game-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  letter-spacing: 0.05em;
+}
+
+/* ゲーム画面（canvas）を囲むフレーム部分 */
+#game-frame {
+  position: relative;
+  padding: 0;
+  line-height: 0; /* canvasの下に余分な隙間ができるのを防ぐ */
+  background: var(--color-bg-panel);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(79, 227, 255, 0.15);
+}
+
+/* ゲーム本体のcanvas */
+#gameCanvas {
+  display: block;
+  background: #000000;
+  border: 2px solid var(--color-accent-cyan);
+  border-radius: 6px;
+  /* ネオンのような光彩効果 */
+  box-shadow:
+    0 0 18px rgba(79, 227, 255, 0.55),
+    inset 0 0 40px rgba(79, 227, 255, 0.08);
+}
+
+/* 四隅の「コーナーブラケット」装飾（HUD/照準っぽい見た目を作る） */
+.corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  pointer-events: none; /* クリックの邪魔をしないようにする */
+}
+.corner-tl { top: -6px;    left: -6px;   border-top: 3px solid var(--color-accent-gold); border-left: 3px solid var(--color-accent-gold); }
+.corner-tr { top: -6px;    right: -6px;  border-top: 3px solid var(--color-accent-gold); border-right: 3px solid var(--color-accent-gold); }
+.corner-bl { bottom: -6px; left: -6px;   border-bottom: 3px solid var(--color-accent-gold); border-left: 3px solid var(--color-accent-gold); }
+.corner-br { bottom: -6px; right: -6px;  border-bottom: 3px solid var(--color-accent-gold); border-right: 3px solid var(--color-accent-gold); }
+
+/* フレーム下の操作説明テキスト */
+.hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  text-align: center;
+}
+</style>
+</head>
+<body>
+
+  <!-- ======================================================================
+       HTML：画面の骨組み
+       ======================================================================
+       ・game-title  … ページ上部の見出し（純粋な装飾用のHTML要素）
+       ・game-frame  … ゲーム画面（canvas）とその周りの装飾を囲む箱
+       ・gameCanvas  … 実際にゲームを描画するcanvas要素（ここが本体）
+       ・hint        … 操作方法の説明文
+  ======================================================================= -->
+
+  <header class="game-title">
+    <h1>STELLAR BARRAGE</h1>
+    <p class="game-subtitle">2D弾幕シューティング - 基礎テンプレート</p>
+  </header>
+
+  <div id="game-frame">
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+
+    <!-- ゲーム画面のサイズはここで決まります（幅480 × 高さ640 の縦長画面） -->
+    <canvas id="gameCanvas" width="480" height="640"></canvas>
+  </div>
+
+  <p class="hint">移動：矢印キー / WASD　　ショット：クリック or Spaceを押し続けると連射（プレイ中）　　難易度選択：↑↓　　決定：クリック or Enter or Space</p>
+
+<script>
+/* ======================================================================
+   JavaScript：ゲームロジック本体
+   ======================================================================
+   このファイルは大きく分けて次の8つのセクションで構成されています。
+
+   ① 定数・グローバル変数の定義
+   ② シーン（画面の状態）の定義
+   ③ 初期化処理
+   ④ 入力管理（キーボード・クリック）
+   ⑤ 更新処理（Update）
+   ⑥ 描画処理（Draw）
+   ⑦ メインループ（requestAnimationFrame）
+   ⑧ イベント登録・ゲーム開始
+
+   新しく機能を追加するときは、「★」マークのコメントを目印にしてください。
+====================================================================== */
+
+
+/* ======================================================================
+   ① 定数・グローバル変数の定義
+====================================================================== */
+
+// canvasとその描画コンテキストを取得
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// canvasのサイズ（HTML側の width/height 属性と合わせる）
+const CANVAS_WIDTH = canvas.width;   // 480
+const CANVAS_HEIGHT = canvas.height; // 640
+
+// 見た目の色（CSSと似た色を使うと統一感が出ます）
+const COLOR_PLAYER   = '#4fe3ff';
+const COLOR_BULLET   = '#ff3d81';
+const COLOR_TEXT     = '#eef1f8';
+const COLOR_TEXT_SUB = '#8891b0';
+const COLOR_GOLD     = '#ffd166';
+
+// プレイヤー（自機）の状態をまとめたオブジェクト
+const player = {
+  x: CANVAS_WIDTH / 2,   // X座標
+  y: CANVAS_HEIGHT - 80, // Y座標
+  radius: 8,             // 見た目の半径（描画に使う。当たり判定には使わない）
+
+  // ★【今回追加】当たり判定（Hitbox）は見た目より小さい円にする（弾幕STGでよくある仕様）
+  //   見た目の円ギリギリまで弾を避けられるようにすることで、プレイに爽快感を持たせられる
+  //   当たり判定の中心は、見た目と同じくキャラクターの中心（player.x, player.y）を基準にする
+  hitboxRadius: 3,
+
+  speed: 4, // 1フレームあたりの移動量（px）
+};
+
+// ★【今回追加】被弾後、一定時間ダメージを受けなくなる「無敵時間」の設定
+//   これが無いと、敵本体に触れ続けている間、毎フレームHPが減ってしまい理不尽になるため
+let playerInvincibleTimer = 0;      // 現在の無敵時間の残りフレーム数
+const PLAYER_INVINCIBLE_FRAMES = 45; // 被弾後、約0.75秒（45フレーム）は無敵になる
+
+// プレイヤーのHP（体力）。0になるとゲームオーバー。
+const PLAYER_MAX_HP = 5;      // 最大HP
+let playerHP = PLAYER_MAX_HP; // 現在のHP
+
+// 敵の弾を格納しておく配列（弾幕シューティングの「弾幕」部分）
+let enemyBullets = [];
+
+// 弾の発生（スポーン）間隔を数えるためのタイマー
+let bulletSpawnTimer = 0;
+const BULLET_SPAWN_INTERVAL = 24; // 24フレームごとに1発発生（約60fps換算で0.4秒）
+const BULLET_SPEED = 3;           // 弾の移動速度
+
+// ★【今回追加】自機（プレイヤー）が撃つ弾を格納しておく配列
+let playerBullets = [];
+
+// ★【今回追加】自機弾（ショット）の連射に関する設定
+//   仕様：発射ボタンを押している間だけ、0.2秒間隔で連射し続ける
+const PLAYER_BULLET_SPEED = 6;      // 自機弾の速度（上方向へ進む）
+let isFireButtonHeld = false;       // 発射ボタン（Space or クリック）が押されっぱなしかどうか
+let fireTimer = 0;                  // 次の発射までの経過フレーム数
+const FIRE_INTERVAL_FRAMES = 12;    // 発射間隔：0.2秒 → 60fps × 0.2秒 = 12フレーム
+
+// ★【今回追加】ボスに関する基本設定
+const BOSS_APPEAR_FRAMES = 60 * 15; // 60fps × 15秒 → プレイ開始から15秒後にボスが出現する
+let bossAppeared = false;           // ボスがすでに出現しているかどうかのフラグ
+const BOSS_BASE_Y = 100;            // ボスの基準となる高さ（ジャンプ攻撃の後もここに戻る）
+
+// ★【今回追加】難易度（Easy / Normal / Hard）ごとのボス設定をまとめたオブジェクト
+//   ・HP / 移動速度 / 攻撃間隔 / 使える攻撃パターン / 攻撃後の隙（硬直フレーム数）を管理する
+//   ・「怒り状態（enrage）」は、HPが enrageHpRatio の割合を下回ったときに発動する強化状態
+//     enrageHpRatio が 0 の場合は「その難易度には怒り状態が存在しない」という意味になる
+const DIFFICULTY_SETTINGS = {
+  easy: {
+    label: 'EASY',
+    description: 'HP少なめ / 突進のみ / 攻撃の隙は長め',
+    maxHp: 18,             // HP：少ない
+    moveSpeed: 1,          // 移動速度：遅い
+    attackInterval: 75,    // 攻撃速度：遅い（間隔が長いほど攻撃が遅い）
+    recoveryFrames: 60,    // 攻撃後の隙：長い
+    patterns: ['dash'],    // 攻撃：突進のみ
+    enrageHpRatio: 0,      // 怒り状態なし
+    enrageMoveSpeed: 1,
+    enrageAttackInterval: 75,
+    enrageRecoveryFrames: 60,
+    enragePatterns: ['dash'],
+  },
+  normal: {
+    label: 'NORMAL',
+    description: 'HP標準 / 突進+ジャンプ / HP50%以下でやや加速',
+    maxHp: 34,                        // HP：標準
+    moveSpeed: 2,                     // 移動速度：普通
+    attackInterval: 50,               // 攻撃速度：普通
+    recoveryFrames: 42,                // 攻撃後の隙：普通
+    patterns: ['dash', 'jump'],        // 攻撃：突進＋ジャンプ攻撃
+    enrageHpRatio: 0.5,                // HPが50%以下で怒り状態
+    enrageMoveSpeed: 2,                // 移動速度は変化なし
+    enrageAttackInterval: 38,          // 攻撃速度が少し上昇する
+    enrageRecoveryFrames: 42,          // 隙の長さは変化なし
+    enragePatterns: ['dash', 'jump'],  // 攻撃パターンは増えない
+  },
+  hard: {
+    label: 'HARD',
+    description: 'HP多め / 突進+ジャンプ+遠距離 / 怒り状態で全面強化',
+    maxHp: 55,                                      // HP：多い
+    moveSpeed: 3,                                   // 移動速度：速い
+    attackInterval: 33,                             // 攻撃速度：速い
+    recoveryFrames: 26,                              // 攻撃後の隙：短い
+    patterns: ['dash', 'jump', 'ranged'],            // 攻撃：突進＋ジャンプ＋遠距離攻撃
+    enrageHpRatio: 0.5,                              // HPが50%以下で怒り状態（激怒）
+    enrageMoveSpeed: 4.5,                            // 移動速度が上昇する
+    enrageAttackInterval: 18,                        // 攻撃速度が大きく上昇する
+    enrageRecoveryFrames: 12,                        // 攻撃後の隙がさらに短くなる
+    enragePatterns: ['dash', 'jump', 'ranged', 'rage'], // ★ 新しい攻撃パターン(rage)が追加される
+  },
+};
+
+// ★【今回追加】現在選択されている難易度（'easy' / 'normal' / 'hard'）。デフォルトはNormal
+let currentDifficulty = 'normal';
+
+// ★【今回追加】難易度選択画面で使う、選択肢の並び順とカーソル位置
+const DIFFICULTY_ORDER = ['easy', 'normal', 'hard'];
+let selectedDifficultyIndex = 1; // 0:Easy 1:Normal 2:Hard （初期カーソルはNormal）
+
+// ★【今回追加】突進・ジャンプ攻撃にかかるフレーム数や速度の設定
+const DASH_TELEGRAPH_FRAMES = 25; // 突進前の予備動作の長さ（この間にプレイヤーへ危険を知らせる）
+const DASH_SPEED = 9;             // 突進中の移動速度（1フレームあたりのpx）
+const JUMP_TELEGRAPH_FRAMES = 25; // ジャンプ攻撃前の予備動作の長さ
+const JUMP_MOVE_FRAMES = 18;      // ジャンプの「降下」「上昇」それぞれにかかるフレーム数
+
+// ★【今回追加】ボスを倒したときの「撃破演出」を再生する長さ（フレーム数）
+const BOSS_DEFEAT_EFFECT_FRAMES = 50; // 約0.8秒間、演出を見せてからリザルト画面へ移行する
+
+// ボスが撃つ弾の速度。難易度や怒り状態に応じて更新される
+let bossBulletSpeed = BULLET_SPEED;
+
+// ボス（敵キャラクター）の状態をまとめたオブジェクト
+const boss = {
+  x: CANVAS_WIDTH / 2, // X座標
+  y: BOSS_BASE_Y,       // Y座標（ジャンプ攻撃で一時的に動き、終わったらここへ戻る）
+  radius: 30,           // 見た目の半径。★仕様：敵の当たり判定は見た目に合わせたサイズにするため、そのまま当たり判定にも使う
+  hp: 0,                // 現在のHP。出現するタイミングで難易度ごとの最大値を代入する
+
+  moveDir: 1,           // ★【今回追加】左右移動の向き（+1:右 / -1:左）。速さは難易度側の値を使う
+  attackTimer: 0,       // 次の攻撃を「始める」までの残りフレーム数
+  state: 'patrol',      // ★【今回追加】現在の行動状態（詳しくは updateBoss() のコメント参照）
+  stateTimer: 0,        // ★【今回追加】現在の状態が終わるまでの残りフレーム数
+
+  // ★【今回追加】各攻撃パターンの実行中に使う一時的なデータ
+  dashTargetX: 0,                // 突進で目指すX座標
+  dashTargetY: 0,                // ★【修正】突進で目指すY座標（これが無いと横にしか動けず当たらないため追加）
+  jumpTargetX: 0,                // ジャンプで着地するX座標
+  jumpTargetY: 0,                // ジャンプで着地するY座標
+  jumpStartX: 0,                 // ジャンプ開始時のX座標（移動の計算に使う）
+  jumpStartY: 0,                 // ジャンプ開始時のY座標（移動の計算に使う）
+};
+
+// スコア・経過時間の管理
+let score = 0;
+let playTimeFrames = 0; // プレイ中の経過フレーム数（ボス出現タイミングの計測にも使う）
+
+// リザルト画面に表示する内容（'clear'：ボスを倒した／'over'：HPが0になった）
+let resultReason = 'clear';
+
+// タイトル・リザルト画面の文字を点滅させるためのフレームカウンタ
+let blinkFrameCount = 0;
+
+
+/* ======================================================================
+   ② シーン（画面の状態）の定義
+   ======================================================================
+   「シーン」とはゲームの画面状態（タイトル／プレイ中／リザルト）のことです。
+   currentScene の値を切り替えることで、update() と draw() の中の処理を
+   スイッチのように出し分けます。
+====================================================================== */
+
+const SCENE = {
+  TITLE:             'title',            // タイトル画面
+  DIFFICULTY_SELECT: 'difficultySelect', // ★【今回追加】難易度選択画面
+  PLAYING:           'playing',          // ゲームプレイ中
+  RESULT:            'result',           // リザルト（結果）画面
+};
+
+// 現在のシーンを保持する変数。ゲームは必ずタイトル画面からスタートする。
+let currentScene = SCENE.TITLE;
+
+// シーンを切り替えるための関数。
+// 切り替え先に応じて必要な初期化（初期位置に戻す・スコアを0にする等）も行う。
+function changeScene(nextScene) {
+  currentScene = nextScene;
+
+  if (nextScene === SCENE.PLAYING) {
+    // ゲーム開始時に、プレイに必要な変数を初期状態に戻す
+    player.x = CANVAS_WIDTH / 2;
+    player.y = CANVAS_HEIGHT - 80;
+    playerHP = PLAYER_MAX_HP;         // ★【今回追加】HPを最大値に戻す
+    playerInvincibleTimer = 0;        // ★【今回追加】無敵タイマーもリセット
+    enemyBullets = [];
+    playerBullets = [];          // ★【今回追加】自機弾を空にする
+    bulletSpawnTimer = 0;
+    isFireButtonHeld = false;    // ★【今回追加】発射ボタンの押下状態をリセット
+    fireTimer = 0;               // ★【今回追加】発射間隔タイマーをリセット
+    score = 0;
+    playTimeFrames = 0;
+
+    // ★【今回追加】ボスの状態を「まだ出現していない」状態に戻す
+    bossAppeared = false;
+    boss.hp = 0;
+    boss.x = CANVAS_WIDTH / 2;
+    boss.y = BOSS_BASE_Y;
+    boss.moveDir = 1;
+    boss.attackTimer = 0;
+    boss.state = 'patrol';
+    boss.stateTimer = 0;
+  }
+
+  // ★ 新しいシーンを追加した場合は、ここに初期化処理を追加してください
+}
+
+
+/* ======================================================================
+   ③ 初期化処理
+   ======================================================================
+   ページを開いた直後に一度だけ実行される準備処理をここにまとめます。
+   （今回は特別な準備は不要なので、コメントとして場所だけ用意しています）
+====================================================================== */
+
+function init() {
+  // ★ 画像や音声を事前に読み込みたい場合は、ここで読み込み処理を書いてください
+  // 例）const playerImage = new Image(); playerImage.src = 'player.png';
+
+  currentScene = SCENE.TITLE;
+}
+
+
+/* ======================================================================
+   ④ 入力管理（キーボード・クリック）
+   ======================================================================
+   押されているキーを記録しておく「keyState」オブジェクトを用意し、
+   update() 側ではこのオブジェクトを見て毎フレームの移動量を決めます。
+====================================================================== */
+
+// 現在押されているキーを記録するオブジェクト（例：{'ArrowLeft': true}）
+const keyState = {};
+
+window.addEventListener('keydown', (event) => {
+  keyState[event.key] = true;
+
+  // Enterキーは常に「決定」操作として扱う
+  if (event.key === 'Enter') {
+    handleDecisionInput();
+  }
+
+  // ★【今回変更】スペースキーは、シーンによって役割を変える特別なキーにする
+  //   ・プレイ中            → 発射ボタン（押している間、連射が続く）
+  //   ・タイトル／リザルト画面 → 決定（次のシーンへ進む）
+  if (event.key === ' ') {
+    if (currentScene === SCENE.PLAYING) {
+      startFiring();
+    } else {
+      handleDecisionInput();
+    }
+  }
+
+  // ★【今回追加】難易度選択画面では、上下キー（またはW/S）でカーソルを動かす
+  if (currentScene === SCENE.DIFFICULTY_SELECT) {
+    if (event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W') {
+      selectedDifficultyIndex = Math.max(0, selectedDifficultyIndex - 1);
+    }
+    if (event.key === 'ArrowDown' || event.key === 's' || event.key === 'S') {
+      selectedDifficultyIndex = Math.min(DIFFICULTY_ORDER.length - 1, selectedDifficultyIndex + 1);
+    }
+  }
+});
+
+window.addEventListener('keyup', (event) => {
+  keyState[event.key] = false;
+
+  // ★【今回追加】スペースキーを離したら、プレイ中であれば連射を止める
+  if (event.key === ' ' && currentScene === SCENE.PLAYING) {
+    stopFiring();
+  }
+});
+
+// ★【今回変更】マウスのボタンは「押した／離した」を分けて扱う必要があるので、
+//   click（1回のクリックで発火）ではなく mousedown / mouseup を使う
+//   ・プレイ中：mousedownで発射開始、mouseupで発射停止（押している間、連射が続く）
+//   ・それ以外の画面：clickを「決定」操作として扱う
+canvas.addEventListener('mousedown', () => {
+  if (currentScene === SCENE.PLAYING) {
+    startFiring();
+  }
+});
+
+// ★【今回追加】canvasの外でマウスボタンを離した場合にも連射が止まるよう、windowで監視する
+window.addEventListener('mouseup', () => {
+  if (currentScene === SCENE.PLAYING) {
+    stopFiring();
+  }
+});
+
+canvas.addEventListener('click', () => {
+  if (currentScene !== SCENE.PLAYING) {
+    handleDecisionInput();
+  }
+});
+
+// タイトル画面・難易度選択画面・リザルト画面での「決定」操作
+function handleDecisionInput() {
+  if (currentScene === SCENE.TITLE) {
+    changeScene(SCENE.DIFFICULTY_SELECT); // タイトル → 難易度選択画面
+
+  } else if (currentScene === SCENE.DIFFICULTY_SELECT) {
+    // ★【今回追加】カーソルが指している難易度を確定してからゲームを開始する
+    currentDifficulty = DIFFICULTY_ORDER[selectedDifficultyIndex];
+    changeScene(SCENE.PLAYING);
+
+  } else if (currentScene === SCENE.RESULT) {
+    changeScene(SCENE.TITLE); // リザルト → タイトル画面
+  }
+}
+
+// ★【今回追加】発射ボタンが押された瞬間に呼ばれる処理（キー入力・マウス押下の両方から呼び出される）
+//   仕様：「発射ボタンを押している間だけ連射する」を実現するため、まず押しっぱなし状態にし、
+//   押した瞬間の1発目もここで発射する（以後の連射は updatePlayerShooting() が担当する）
+function startFiring() {
+  if (isFireButtonHeld) {
+    return; // すでに押されている間の重複処理（キーのオートリピート等）を防ぐ
+  }
+  isFireButtonHeld = true;
+  fireTimer = 0;
+  shootPlayerBullet();
+}
+
+// ★【今回追加】発射ボタンが離された瞬間に呼ばれる処理。連射を停止する
+function stopFiring() {
+  isFireButtonHeld = false;
+}
+
+// 自機弾を1発発射する処理（実際に弾を1つ生成するのはここだけ）
+function shootPlayerBullet() {
+  // 自機の少し前方（プレイヤーは上向きに進むゲームなので、前方＝自機の少し上）から
+  // まっすぐ前へ飛んでいく弾を1つ追加する
+  playerBullets.push({
+    x: player.x,
+    y: player.y - player.radius, // ★仕様：発射位置はプレイヤーの前方
+    vx: 0,                    // 横方向には動かない
+    vy: -PLAYER_BULLET_SPEED, // 上方向（マイナス）へ進む
+    radius: 4,
+    hit: false,                // ボスに命中したかどうかのフラグ（当たり判定処理で使用）
+  });
+
+  // ★ 弾の速度・見た目を変えたい場合はここのオブジェクトの値を調整してください
+  // ★ 3WAYショットなどにしたい場合は、角度を変えたオブジェクトを
+  //    push() でまとめて複数回追加する形に拡張できます
+}
+
+
+/* ======================================================================
+   ⑤ 更新処理（Update）
+   ======================================================================
+   毎フレーム呼び出され、「座標の計算」「当たり判定」「シーン遷移の判定」
+   など、画面には直接描かない“状態の更新”をまとめて行う場所です。
+====================================================================== */
+
+function update() {
+  blinkFrameCount++;
+
+  // 現在のシーンによって、更新する内容を分岐させる
+  switch (currentScene) {
+    case SCENE.TITLE:
+      updateTitleScene();
+      break;
+    case SCENE.DIFFICULTY_SELECT:
+      updateDifficultySelectScene();
+      break;
+    case SCENE.PLAYING:
+      updatePlayingScene();
+      break;
+    case SCENE.RESULT:
+      updateResultScene();
+      break;
+  }
+}
+
+// --- タイトル画面の更新処理 ---
+function updateTitleScene() {
+  // ★ タイトル画面でキャラクターを動かす等の演出を追加する場合はここに書く
+}
+
+// --- ★【今回追加】難易度選択画面の更新処理 ---
+function updateDifficultySelectScene() {
+  // 選択操作はキー入力イベント側で直接行っているため、ここでは特に何もしない
+}
+
+// --- ゲームプレイ中の更新処理 ---
+function updatePlayingScene() {
+  updatePlayerInvincibility(); // ★【今回追加】無敵時間タイマーの更新
+  movePlayer();
+  updatePlayerShooting(); // ★【今回追加】発射ボタンを押し続けている間の連射処理
+  updateEnemyBullets();
+  updatePlayerBullets(); // ★【今回追加】自機弾の移動・画面外削除・ボスへの命中判定
+  updateBoss();          // ★【今回追加】ボスの出現タイミング・移動の管理
+  checkPlayerBossCollision(); // ★【今回追加】ボス本体とプレイヤーの接触判定（状態を問わず毎フレーム行う）
+  updateScoreAndTimer();
+}
+
+// --- リザルト画面の更新処理 ---
+function updateResultScene() {
+  // ★ リザルト画面でランキング表示などをしたい場合はここに追加する
+}
+
+// プレイヤーの移動処理（矢印キー / WASD 対応）
+function movePlayer() {
+  if (keyState['ArrowLeft']  || keyState['a'] || keyState['A']) player.x -= player.speed;
+  if (keyState['ArrowRight'] || keyState['d'] || keyState['D']) player.x += player.speed;
+  if (keyState['ArrowUp']    || keyState['w'] || keyState['W']) player.y -= player.speed;
+  if (keyState['ArrowDown']  || keyState['s'] || keyState['S']) player.y += player.speed;
+
+  // プレイヤーがcanvasの外に出ないように座標を制限する
+  player.x = Math.max(player.radius, Math.min(CANVAS_WIDTH  - player.radius, player.x));
+  player.y = Math.max(player.radius, Math.min(CANVAS_HEIGHT - player.radius, player.y));
+}
+
+// ★【今回追加】発射ボタンを押している間、一定間隔(FIRE_INTERVAL_FRAMES)で弾を発射し続ける処理
+//   仕様：
+//   ・発射ボタンを押している間だけ連射する　→ isFireButtonHeldがfalseなら何もしない
+//   ・発射間隔は0.2秒                     → FIRE_INTERVAL_FRAMES(12フレーム)ごとに1発
+//   ・ボタンを離したら連射を停止する         → stopFiring()でisFireButtonHeldがfalseになるので自動的に止まる
+//   ・1回の発射ごとに弾を1つ生成する         → shootPlayerBullet()を1回だけ呼び出す
+function updatePlayerShooting() {
+  if (!isFireButtonHeld) {
+    return; // ボタンが押されていなければ、タイマーも進めず何もしない
+  }
+
+  fireTimer++;
+  if (fireTimer >= FIRE_INTERVAL_FRAMES) {
+    fireTimer = 0;
+    shootPlayerBullet();
+  }
+}
+
+// ★【今回追加】無敵時間タイマーを減らす処理（0より大きい間はダメージを受けない）
+function updatePlayerInvincibility() {
+  if (playerInvincibleTimer > 0) {
+    playerInvincibleTimer--;
+  }
+}
+
+// プレイヤーがダメージを受けたときの共通処理
+//   （敵弾に当たった時・ボスに体当たりされた時など、複数の場所から呼び出して使う）
+function damagePlayer(amount) {
+  // ★【今回追加】無敵時間中は何もせずに抜ける（連続ヒットによる理不尽な即死を防ぐ）
+  if (playerInvincibleTimer > 0) {
+    return;
+  }
+
+  playerHP -= amount;
+  playerInvincibleTimer = PLAYER_INVINCIBLE_FRAMES; // ダメージを受けたら無敵時間を開始する
+
+  if (playerHP <= 0) {
+    playerHP = 0;
+    resultReason = 'over';
+    changeScene(SCENE.RESULT); // HPが0になったのでゲームオーバー
+  }
+}
+
+// 敵弾の発生・移動・当たり判定・画面外削除をまとめて行う処理
+function updateEnemyBullets() {
+  // --- 一定間隔で新しい弾を発生させる ---
+  // ★【変更】ボスが出現した後は、この雑魚敵弾の発生を止める。
+  //   ボス出現後の弾は、ボス専用AI（updateBoss内の各状態関数）が発生させる。
+  if (!bossAppeared) {
+    bulletSpawnTimer++;
+    if (bulletSpawnTimer >= BULLET_SPAWN_INTERVAL) {
+      bulletSpawnTimer = 0;
+      spawnEnemyBullet();
+    }
+  }
+
+  // --- 各弾の移動 ---
+  for (const bullet of enemyBullets) {
+    bullet.x += bullet.vx;
+    bullet.y += bullet.vy;
+  }
+
+  // --- 画面外に出た弾を配列から取り除く（そのままだと弾が増え続けて重くなるため） ---
+  enemyBullets = enemyBullets.filter((bullet) => {
+    return bullet.y < CANVAS_HEIGHT + 20 &&
+           bullet.y > -20 &&
+           bullet.x > -20 &&
+           bullet.x < CANVAS_WIDTH + 20;
+  });
+
+  // --- プレイヤーと弾の当たり判定 ---
+  for (const bullet of enemyBullets) {
+    if (isHitPlayer(bullet)) {
+      bullet.hit = true; // 命中した弾に印をつける（後でまとめて削除する）
+      damagePlayer(1);   // ★【変更】ダメージ処理を共通関数にまとめた（ボスの体当たりでも使い回す）
+
+      if (currentScene === SCENE.RESULT) {
+        return; // ゲームオーバーになったので、これ以上の処理は不要
+      }
+    }
+  }
+
+  // 命中した弾（hitフラグが立った弾）をまとめて配列から取り除く
+  enemyBullets = enemyBullets.filter((bullet) => !bullet.hit);
+}
+
+// 1発の敵弾を生成して enemyBullets 配列に追加する関数
+function spawnEnemyBullet() {
+  // 画面上部のランダムな位置から弾を発生させる
+  const startX = Math.random() * CANVAS_WIDTH;
+  const startY = -10;
+
+  // 発生時点でのプレイヤーの位置に向かう角度を計算する（狙い撃ちパターン）
+  const angle = Math.atan2(player.y - startY, player.x - startX);
+
+  enemyBullets.push({
+    x: startX,
+    y: startY,
+    vx: Math.cos(angle) * BULLET_SPEED, // X方向の速度
+    vy: Math.sin(angle) * BULLET_SPEED, // Y方向の速度
+    radius: 6,
+    hit: false, // プレイヤーに命中したかどうかのフラグ（当たり判定処理で使用）
+  });
+
+  // ★ 新しい弾幕パターンを追加したい場合は、この関数をコピーして
+  //    spawnEnemyBulletPattern2() のような別関数を作り、
+  //    updatePlayingScene() やタイマーの分岐から呼び出すようにしてください。
+  //    （例：円状に広がる弾、複数方向に同時発射する弾 など）
+}
+
+// ★【今回追加】円同士が重なっているかどうかを判定する汎用の当たり判定関数
+//   プレイヤー弾とボスの当たり判定、ボス本体とプレイヤーの当たり判定などでも使い回す
+function isCircleColliding(x1, y1, r1, x2, y2, r2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  return distance < r1 + r2;
+}
+
+// 敵弾がプレイヤーの「当たり判定（Hitbox）」に触れているかどうかを判定する
+// ★仕様：見た目(player.radius)ではなく、より小さいplayer.hitboxRadiusを使う
+function isHitPlayer(bullet) {
+  return isCircleColliding(bullet.x, bullet.y, bullet.radius, player.x, player.y, player.hitboxRadius);
+}
+
+// ★【今回追加】自機弾（playerBullets）の移動・画面外削除・ボスへの命中判定
+function updatePlayerBullets() {
+  // --- 各弾の移動（まっすぐ上に進む） ---
+  for (const bullet of playerBullets) {
+    bullet.x += bullet.vx;
+    bullet.y += bullet.vy;
+  }
+
+  // --- 画面外（上）に出た弾を配列から取り除く ---
+  playerBullets = playerBullets.filter((bullet) => bullet.y > -bullet.radius);
+
+  // --- ボスが出現していれば、自機弾とボスの当たり判定を行う ---
+  // ★仕様：敵(ボス)の当たり判定は見た目に合わせたサイズ(boss.radius)をそのまま使う
+  if (bossAppeared && boss.hp > 0) {
+    for (const bullet of playerBullets) {
+      if (isCircleColliding(bullet.x, bullet.y, bullet.radius, boss.x, boss.y, boss.radius)) {
+        bullet.hit = true; // 命中した弾に印をつける（後でまとめて削除する）
+        boss.hp--;
+      }
+    }
+
+    // 命中した弾をまとめて削除する
+    playerBullets = playerBullets.filter((bullet) => !bullet.hit);
+
+    // ★【変更】ボスのHPが0以下になったら、即リザルトへ行くのではなく
+    //   「撃破演出（defeated状態）」を一定時間再生してからクリア扱いにする
+    if (boss.hp <= 0) {
+      boss.hp = 0;
+      boss.state = 'defeated';
+      boss.stateTimer = BOSS_DEFEAT_EFFECT_FRAMES;
+      enemyBullets = []; // 演出中にダメージを受けないよう、残っている敵弾は消しておく
+    }
+  }
+
+  // ★ ボスの弱点部位を作りたい場合など、当たり判定を細かくしたい場合はここを拡張してください
+}
+
+// ★【今回追加】ボスの出現タイミングと、出現後の行動（移動・攻撃）を管理する処理
+//   ボスは「状態（boss.state）」を持ち、状態に応じて動きが変わるシンプルなAIになっている。
+//     patrol         … 通常の左右移動。一定時間ごとに次の攻撃をランダムに選ぶ
+//     dash_telegraph … 突進の予備動作（この間、見た目が点滅して危険を知らせる）
+//     dash_move      … 実際に高速で突進する（プレイヤーに触れると接触ダメージ）
+//     jump_telegraph … ジャンプ攻撃の予備動作
+//     jump_down      … プレイヤーの近くまで一気に移動する（降下）
+//     jump_up        … 着地して衝撃波を出した後、元の高さまで戻る（上昇）
+//     recovery       … 攻撃後の隙。この間は次の攻撃をせず、ただ止まっている
+function updateBoss() {
+  // まだボスが出現していない場合は、経過フレーム数をチェックする
+  if (!bossAppeared) {
+    if (playTimeFrames >= BOSS_APPEAR_FRAMES) {
+      // 規定の時間が経過したのでボスを出現させる（HPは選択中の難易度の値を使う）
+      bossAppeared = true;
+      boss.hp = DIFFICULTY_SETTINGS[currentDifficulty].maxHp;
+      boss.state = 'patrol';
+      boss.stateTimer = 0;
+      boss.attackTimer = 0;
+    }
+    return; // まだ出現していない間は、これ以降の処理は不要
+  }
+
+  // 現在の状態に応じて、処理を振り分ける
+  switch (boss.state) {
+    case 'patrol':         updateBossPatrol();        break;
+    case 'dash_telegraph': updateBossDashTelegraph(); break;
+    case 'dash_move':      updateBossDashMove();      break;
+    case 'jump_telegraph': updateBossJumpTelegraph(); break;
+    case 'jump_down':      updateBossJumpDown();      break;
+    case 'jump_up':        updateBossJumpUp();        break;
+    case 'recovery':       updateBossRecovery();      break;
+    case 'defeated':       updateBossDefeated();      break; // ★【今回追加】撃破演出中
+  }
+}
+
+// --- ★【今回追加】状態「defeated」：撃破演出を再生し、終わったらリザルト（クリア）画面へ ---
+function updateBossDefeated() {
+  boss.stateTimer--;
+  if (boss.stateTimer <= 0) {
+    resultReason = 'clear';
+    changeScene(SCENE.RESULT); // ボス討伐でクリア
+  }
+}
+
+// ★【今回追加】現在の難易度・HPの状態から、各種パラメータを取得するヘルパー関数群
+//   「怒り状態（enrage）」かどうかで、通常値とenrage値のどちらを使うかを切り替える
+
+// HPが「怒り状態」に入る割合を下回っているかどうかを判定する
+function isBossEnraged() {
+  const config = DIFFICULTY_SETTINGS[currentDifficulty];
+  if (config.enrageHpRatio <= 0) {
+    return false; // この難易度には怒り状態が存在しない（Easyなど）
+  }
+  return (boss.hp / config.maxHp) <= config.enrageHpRatio;
+}
+
+function getBossMoveSpeed() {
+  const config = DIFFICULTY_SETTINGS[currentDifficulty];
+  return isBossEnraged() ? config.enrageMoveSpeed : config.moveSpeed;
+}
+
+function getBossAttackInterval() {
+  const config = DIFFICULTY_SETTINGS[currentDifficulty];
+  return isBossEnraged() ? config.enrageAttackInterval : config.attackInterval;
+}
+
+function getBossRecoveryFrames() {
+  const config = DIFFICULTY_SETTINGS[currentDifficulty];
+  return isBossEnraged() ? config.enrageRecoveryFrames : config.recoveryFrames;
+}
+
+function getBossAvailablePatterns() {
+  const config = DIFFICULTY_SETTINGS[currentDifficulty];
+  return isBossEnraged() ? config.enragePatterns : config.patterns;
+}
+
+// ボスの弾速。難易度の基本値に、怒り状態ならさらに倍率をかける
+function getBossBulletSpeed() {
+  const baseByDifficulty = { easy: BULLET_SPEED, normal: BULLET_SPEED * 1.1, hard: BULLET_SPEED * 1.25 };
+  const base = baseByDifficulty[currentDifficulty];
+  return isBossEnraged() ? base * 1.2 : base;
+}
+
+// 座標がcanvasの外に出ないように制限する（突進・ジャンプの目標地点計算で使う）
+function clampBossX(x) {
+  return Math.max(boss.radius, Math.min(CANVAS_WIDTH - boss.radius, x));
+}
+
+function clampBossY(y) {
+  return Math.max(boss.radius, Math.min(CANVAS_HEIGHT - boss.radius, y));
+}
+
+// --- 状態「patrol」：左右にゆっくり往復移動しながら、次の攻撃までの時間を数える ---
+function updateBossPatrol() {
+  boss.x += boss.moveDir * getBossMoveSpeed();
+  if (boss.x - boss.radius < 0 || boss.x + boss.radius > CANVAS_WIDTH) {
+    boss.moveDir *= -1; // 端まで来たら向きを反転させる
+  }
+
+  boss.attackTimer++;
+  if (boss.attackTimer >= getBossAttackInterval()) {
+    boss.attackTimer = 0;
+    startNextBossAttack();
+  }
+}
+
+// ★【今回のポイント】次に行う攻撃を、現在の難易度/怒り状態で使えるパターンからランダムに1つ選び、
+//   対応する状態へ遷移させる。怒り状態になるとpatternsの候補が増える(Hard)ため、
+//   自然と「攻撃方法が多彩になる」動きになる。
+function startNextBossAttack() {
+  const patterns = getBossAvailablePatterns();
+  const chosen = patterns[Math.floor(Math.random() * patterns.length)];
+
+  if (chosen === 'dash') {
+    // --- 突進：予備動作の後、プレイヤーがいた位置（X・Y座標とも）めがけて高速で体当たりする ---
+    boss.state = 'dash_telegraph';
+    boss.stateTimer = DASH_TELEGRAPH_FRAMES;
+    boss.dashTargetX = clampBossX(player.x);
+    boss.dashTargetY = clampBossY(player.y);
+
+  } else if (chosen === 'jump') {
+    // --- ジャンプ攻撃：予備動作の後、プレイヤーの近くまで飛び込み、着地と同時に衝撃波を出す ---
+    boss.state = 'jump_telegraph';
+    boss.stateTimer = JUMP_TELEGRAPH_FRAMES;
+    boss.jumpTargetX = clampBossX(player.x);
+    boss.jumpTargetY = Math.min(player.y - 60, CANVAS_HEIGHT - 150);
+
+  } else if (chosen === 'ranged') {
+    // --- 遠距離攻撃：既存の弾幕パターン（狙い撃ち/拡散/全方位）からランダムに1つ即発射する ---
+    bossBulletSpeed = getBossBulletSpeed();
+    fireRandomRangedAttack();
+    boss.state = 'recovery';
+    boss.stateTimer = getBossRecoveryFrames();
+
+  } else if (chosen === 'rage') {
+    // --- 怒り状態専用の強化攻撃（Hardが怒り状態のときだけ選ばれる新パターン） ---
+    bossBulletSpeed = getBossBulletSpeed();
+    bossAttackRageBurst();
+    boss.state = 'recovery';
+    boss.stateTimer = getBossRecoveryFrames();
+  }
+}
+
+// --- 状態「dash_telegraph」：突進前の予備動作。時間が来たら実際の突進に移る ---
+function updateBossDashTelegraph() {
+  boss.stateTimer--;
+  if (boss.stateTimer <= 0) {
+    boss.state = 'dash_move';
+  }
+}
+
+// --- 状態「dash_move」：目標地点(X・Y)に向かって高速移動する ---
+//   ★仕様：プレイヤーへの接触ダメージは、状態を問わず毎フレーム行う checkPlayerBossCollision() で判定する
+function updateBossDashMove() {
+  const dx = boss.dashTargetX - boss.x;
+  const dy = boss.dashTargetY - boss.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance <= DASH_SPEED) {
+    boss.x = boss.dashTargetX; // 目的地にぴったり到達
+    boss.y = boss.dashTargetY;
+    boss.state = 'recovery';
+    boss.stateTimer = getBossRecoveryFrames(); // ★攻撃後の隙。ここが長い/短いで難易度差が出る
+  } else {
+    // 目標方向へ正規化したベクトルで進む（斜め方向にも正しく突進できるようにする）
+    boss.x += (dx / distance) * DASH_SPEED;
+    boss.y += (dy / distance) * DASH_SPEED;
+  }
+}
+
+// --- 状態「jump_telegraph」：ジャンプ攻撃前の予備動作 ---
+function updateBossJumpTelegraph() {
+  boss.stateTimer--;
+  if (boss.stateTimer <= 0) {
+    boss.jumpStartX = boss.x;
+    boss.jumpStartY = boss.y;
+    boss.state = 'jump_down';
+    boss.stateTimer = JUMP_MOVE_FRAMES;
+  }
+}
+
+// --- 状態「jump_down」：プレイヤーの近くまで一気に移動し、着地したら衝撃波を出す ---
+function updateBossJumpDown() {
+  boss.stateTimer--;
+  const progress = 1 - boss.stateTimer / JUMP_MOVE_FRAMES; // 0 → 1 へ進む
+  boss.x = boss.jumpStartX + (boss.jumpTargetX - boss.jumpStartX) * progress;
+  boss.y = boss.jumpStartY + (boss.jumpTargetY - boss.jumpStartY) * progress;
+
+  if (boss.stateTimer <= 0) {
+    // 着地！ 衝撃波として全方位弾を発生させる
+    bossBulletSpeed = getBossBulletSpeed();
+    bossAttackCircularBurst();
+
+    boss.jumpStartY = boss.y;
+    boss.state = 'jump_up';
+    boss.stateTimer = JUMP_MOVE_FRAMES;
+  }
+}
+
+// --- 状態「jump_up」：着地位置から、元の高さ（BOSS_BASE_Y）まで戻る ---
+function updateBossJumpUp() {
+  boss.stateTimer--;
+  const progress = 1 - boss.stateTimer / JUMP_MOVE_FRAMES;
+  boss.y = boss.jumpStartY + (BOSS_BASE_Y - boss.jumpStartY) * progress;
+
+  if (boss.stateTimer <= 0) {
+    boss.y = BOSS_BASE_Y;
+    boss.state = 'recovery';
+    boss.stateTimer = getBossRecoveryFrames();
+  }
+}
+
+// --- 状態「recovery」：攻撃後の隙。この間はじっと止まって次の攻撃をしない ---
+function updateBossRecovery() {
+  boss.stateTimer--;
+  if (boss.stateTimer <= 0) {
+    boss.y = BOSS_BASE_Y; // ★突進などで下がってきた高さを、次の巡回の前に元へ戻す
+    boss.state = 'patrol';
+  }
+}
+
+// ★【今回追加】プレイヤーとボス本体の接触判定（ボスの状態を問わず、毎フレーム呼び出す）
+//   ★仕様：「プレイヤーと敵本体が接触した場合もダメージを受ける」に対応する処理
+//   プレイヤー側はhitboxRadius（見た目より小さい判定円）、ボス側はradius（見た目通り）を使う
+function checkPlayerBossCollision() {
+  // ボスが未出現、または撃破演出中（defeated）は接触判定を行わない
+  if (!bossAppeared || boss.state === 'defeated') {
+    return;
+  }
+
+  if (isCircleColliding(player.x, player.y, player.hitboxRadius, boss.x, boss.y, boss.radius)) {
+    damagePlayer(1); // 無敵時間中であれば、damagePlayer内部で何もせず無視される
+  }
+}
+
+// 遠距離攻撃：既存の3つの弾幕パターンから、ランダムに1つを選んで発射する
+function fireRandomRangedAttack() {
+  const rangedPatterns = [bossAttackAimedShot, bossAttackSpreadShot, bossAttackCircularBurst];
+  const pattern = rangedPatterns[Math.floor(Math.random() * rangedPatterns.length)];
+  pattern();
+}
+
+// --- ボスの攻撃パターン①：狙い撃ち（プレイヤーめがけて単発弾を1発撃つ） ---
+function bossAttackAimedShot() {
+  const angle = Math.atan2(player.y - boss.y, player.x - boss.x);
+
+  enemyBullets.push({
+    x: boss.x,
+    y: boss.y,
+    vx: Math.cos(angle) * bossBulletSpeed,
+    vy: Math.sin(angle) * bossBulletSpeed,
+    radius: 6,
+    hit: false,
+  });
+}
+
+// --- ボスの攻撃パターン②：拡散弾（狙い撃ちの方向を中心に、扇状に複数発を同時発射） ---
+function bossAttackSpreadShot() {
+  const baseAngle = Math.atan2(player.y - boss.y, player.x - boss.x);
+  const bulletCount = 5;           // 同時に発射する弾の数
+  const spreadAngle = Math.PI / 4; // 扇形の広がり角度（45度ぶん）
+
+  for (let i = 0; i < bulletCount; i++) {
+    // -spreadAngle/2 〜 +spreadAngle/2 の範囲に、角度を均等に割り振る
+    const angle = baseAngle - spreadAngle / 2 + (spreadAngle / (bulletCount - 1)) * i;
+
+    enemyBullets.push({
+      x: boss.x,
+      y: boss.y,
+      vx: Math.cos(angle) * bossBulletSpeed,
+      vy: Math.sin(angle) * bossBulletSpeed,
+      radius: 6,
+      hit: false,
+    });
+  }
+}
+
+// --- ボスの攻撃パターン③：全方位弾（円状に弾をばらまく、いわゆる「弾幕」らしい攻撃） ---
+function bossAttackCircularBurst() {
+  const bulletCount = 16; // 円周上に並べる弾の数（多いほど密度の高い弾幕になる）
+
+  for (let i = 0; i < bulletCount; i++) {
+    const angle = (Math.PI * 2 / bulletCount) * i; // 円周を均等に分割した角度
+
+    enemyBullets.push({
+      x: boss.x,
+      y: boss.y,
+      vx: Math.cos(angle) * bossBulletSpeed,
+      vy: Math.sin(angle) * bossBulletSpeed,
+      radius: 6,
+      hit: false,
+    });
+  }
+
+  // ★ 新しい攻撃パターンを追加したい場合は、この関数をコピーして
+  //    bossAttackXxx() という名前の関数を作り、
+  //    startNextBossAttack() 内の該当する分岐に追加してください。
+}
+
+// --- ★【今回追加】怒り状態専用の攻撃パターン（Hardが怒り状態のときだけ使用可能） ---
+//     全方位弾を通常より多く発生させつつ、同時にプレイヤーへの狙い撃ちも撃つ「コンボ攻撃」
+function bossAttackRageBurst() {
+  const bulletCount = 24; // 通常の全方位弾(16発)より多く撃つことで、怒り状態らしい激しさを出す
+
+  for (let i = 0; i < bulletCount; i++) {
+    const angle = (Math.PI * 2 / bulletCount) * i;
+
+    enemyBullets.push({
+      x: boss.x,
+      y: boss.y,
+      vx: Math.cos(angle) * bossBulletSpeed,
+      vy: Math.sin(angle) * bossBulletSpeed,
+      radius: 6,
+      hit: false,
+    });
+  }
+
+  // 全方位弾に加えて、プレイヤーへの狙い撃ちも同時に発射する（コンボ攻撃のイメージ）
+  bossAttackAimedShot();
+}
+
+// スコアと生存時間の更新
+// ★【変更】クリア条件が「制限時間まで生き残る」→「ボスを倒す」に変わったため、
+//   ここでの自動クリア判定は削除した（クリア判定は updatePlayerBullets() 内で行う）
+function updateScoreAndTimer() {
+  playTimeFrames++;
+  score = Math.floor(playTimeFrames / 6); // 生存時間に応じてスコアを加算
+
+  // ★ 敵を倒した時に得点を加算したい場合など、スコア加算のルールはここに追加してください
+}
+
+
+/* ======================================================================
+   ⑥ 描画処理（Draw）
+   ======================================================================
+   毎フレーム呼び出され、canvas に絵を描く処理をまとめて行う場所です。
+   「① 背景を消す → ② シーンに応じた絵を描く」という流れが基本です。
+====================================================================== */
+
+function draw() {
+  // 前のフレームの絵を消してから描き直す（消さないと絵が残り続けてしまう）
+  ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // 現在のシーンによって、描画する内容を分岐させる
+  switch (currentScene) {
+    case SCENE.TITLE:
+      drawTitleScene();
+      break;
+    case SCENE.DIFFICULTY_SELECT:
+      drawDifficultySelectScene();
+      break;
+    case SCENE.PLAYING:
+      drawPlayingScene();
+      break;
+    case SCENE.RESULT:
+      drawResultScene();
+      break;
+  }
+}
+
+// --- タイトル画面の描画 ---
+function drawTitleScene() {
+  drawBackgroundGrid();
+
+  ctx.textAlign = 'center';
+
+  // メインタイトル
+  ctx.fillStyle = COLOR_PLAYER;
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillText('BULLET STORM', CANVAS_WIDTH / 2, 260);
+
+  // サブタイトル
+  ctx.fillStyle = COLOR_TEXT_SUB;
+  ctx.font = '16px monospace';
+  ctx.fillText('2D DANMAKU SHOOTING - DEMO', CANVAS_WIDTH / 2, 300);
+
+  // 「スタート」の案内文字を点滅させる（blinkFrameCountが偶数/奇数で表示を切り替え）
+  if (Math.floor(blinkFrameCount / 30) % 2 === 0) {
+    ctx.fillStyle = COLOR_GOLD;
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('CLICK or PRESS SPACE TO START', CANVAS_WIDTH / 2, 400);
+  }
+
+  ctx.textAlign = 'left'; // 他の描画に影響しないよう元に戻しておく
+
+  // ★ タイトル画面に装飾用のキャラクターやロゴ画像を描きたい場合はここに追加する
+}
+
+// --- ★【今回追加】難易度選択画面の描画 ---
+function drawDifficultySelectScene() {
+  drawBackgroundGrid();
+
+  ctx.textAlign = 'center';
+
+  // 見出し
+  ctx.fillStyle = COLOR_PLAYER;
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText('SELECT DIFFICULTY', CANVAS_WIDTH / 2, 150);
+
+  // Easy / Normal / Hard の3つを縦に並べて表示し、選択中のものをハイライトする
+  for (let i = 0; i < DIFFICULTY_ORDER.length; i++) {
+    const config = DIFFICULTY_SETTINGS[DIFFICULTY_ORDER[i]];
+    const isSelected = (i === selectedDifficultyIndex);
+    const rowY = 250 + i * 110;
+
+    // ラベル（選択中は金色＋カーソル記号、それ以外は薄い色）
+    ctx.font = 'bold 24px monospace';
+    ctx.fillStyle = isSelected ? COLOR_GOLD : COLOR_TEXT_SUB;
+    ctx.fillText((isSelected ? '▶ ' : '　') + config.label, CANVAS_WIDTH / 2, rowY);
+
+    // 説明文（小さめの文字で仕様を表示）
+    ctx.font = '12px monospace';
+    ctx.fillStyle = isSelected ? COLOR_TEXT : COLOR_TEXT_SUB;
+    ctx.fillText(config.description, CANVAS_WIDTH / 2, rowY + 24);
+  }
+
+  // 操作案内（点滅）
+  if (Math.floor(blinkFrameCount / 30) % 2 === 0) {
+    ctx.fillStyle = COLOR_TEXT_SUB;
+    ctx.font = '14px monospace';
+    ctx.fillText('↑↓ : SELECT　　CLICK / SPACE / ENTER : DECIDE', CANVAS_WIDTH / 2, 590);
+  }
+
+  ctx.textAlign = 'left';
+}
+
+// --- ゲームプレイ中の描画 ---
+function drawPlayingScene() {
+  drawBackgroundGrid();
+
+  // --- プレイヤー（自機）の描画：光彩付きの円 ---
+  // ★【今回追加】無敵時間中は点滅させて、今はダメージを受けないことが視覚的にわかるようにする
+  const isPlayerInvincible = playerInvincibleTimer > 0;
+  const isPlayerFlashOn = Math.floor(blinkFrameCount / 4) % 2 === 0;
+  if (!isPlayerInvincible || isPlayerFlashOn) {
+    ctx.save();
+    ctx.shadowColor = COLOR_PLAYER;
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = COLOR_PLAYER;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ★【今回追加】当たり判定(Hitbox)は見た目より小さいので、中心に小さな点として表示する
+    //   （敵弾がどこまで避けられるか、プレイヤーが直感的に把握できるようにするための演出）
+    ctx.fillStyle = COLOR_TEXT;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.hitboxRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- 敵弾の描画 ---
+  ctx.save();
+  ctx.shadowColor = COLOR_BULLET;
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = COLOR_BULLET;
+  for (const bullet of enemyBullets) {
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // --- ★【今回追加】自機弾の描画 ---
+  ctx.save();
+  ctx.shadowColor = COLOR_PLAYER;
+  ctx.shadowBlur = 6;
+  ctx.fillStyle = COLOR_PLAYER;
+  for (const bullet of playerBullets) {
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // --- ★【今回追加】ボスの描画（出現している場合のみ） ---
+  if (boss.state === 'defeated') {
+    // ★【今回追加】撃破演出：HPバーは表示せず、ボスが縮みながら消え、輪が広がる演出を再生する
+    const progress = 1 - boss.stateTimer / BOSS_DEFEAT_EFFECT_FRAMES; // 0 → 1 へ進む
+    const fadeAlpha = Math.max(0, 1 - progress); // だんだん薄くなる
+
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    ctx.shadowColor = COLOR_GOLD;
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = COLOR_GOLD;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius * (1 - progress * 0.5), 0, Math.PI * 2); // 少しずつ縮む
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    ctx.strokeStyle = COLOR_BULLET;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius + progress * boss.radius * 2.5, 0, Math.PI * 2); // 広がる輪
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = COLOR_GOLD;
+    ctx.font = 'bold 22px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('BOSS DEFEATED!', CANVAS_WIDTH / 2, 70);
+    ctx.textAlign = 'left';
+
+  } else if (bossAppeared) {
+    // 突進・ジャンプの予備動作中は、色を点滅させてプレイヤーに危険を知らせる
+    const isTelegraph = (boss.state === 'dash_telegraph' || boss.state === 'jump_telegraph');
+    const isFlashOn = Math.floor(blinkFrameCount / 4) % 2 === 0; // 4フレームごとに点滅
+    const bossColor = (isTelegraph && isFlashOn) ? COLOR_BULLET : COLOR_GOLD;
+
+    ctx.save();
+    ctx.shadowColor = bossColor;
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = bossColor;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ボスのHPバー（画面上部中央に表示。残りHPの割合ぶんだけ塗る）
+    // ★仕様：通常の敵にはHPバーを出さず、ボスにだけ画面上部に表示する
+    const bossMaxHp = DIFFICULTY_SETTINGS[currentDifficulty].maxHp;
+    const barWidth = 220;
+    const barX = (CANVAS_WIDTH - barWidth) / 2;
+    const barY = 40;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // バーの背景（枠）
+    ctx.fillRect(barX, barY, barWidth, 10);
+    ctx.fillStyle = isBossEnraged() ? COLOR_BULLET : COLOR_GOLD; // 怒り状態ならバーも赤くする
+    ctx.fillRect(barX, barY, barWidth * (boss.hp / bossMaxHp), 10);
+
+    // 怒り状態のときは「ENRAGE」の文字を表示する
+    if (isBossEnraged()) {
+      ctx.fillStyle = COLOR_BULLET;
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('ENRAGE!', CANVAS_WIDTH / 2, 66);
+      ctx.textAlign = 'left';
+    }
+  } else {
+    // ボスがまだ出現していない間は、出現までの残り秒数を表示する
+    const secondsUntilBoss = Math.max(0, Math.ceil((BOSS_APPEAR_FRAMES - playTimeFrames) / 60));
+    ctx.fillStyle = COLOR_TEXT_SUB;
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('BOSS APPEARS IN ' + secondsUntilBoss + 's', CANVAS_WIDTH / 2, 40);
+    ctx.textAlign = 'left';
+  }
+
+  // --- ★【今回変更】HUD：プレイヤーHPバー（画面左上）とスコア（画面右上） ---
+  drawPlayerHpBar();
+
+  ctx.fillStyle = COLOR_TEXT;
+  ctx.font = '16px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('SCORE: ' + score, CANVAS_WIDTH - 12, 24);
+  ctx.textAlign = 'left';
+
+  // ★【今回追加】現在の難易度を画面左下に小さく表示
+  ctx.fillStyle = COLOR_TEXT_SUB;
+  ctx.font = '11px monospace';
+  ctx.fillText('DIFFICULTY: ' + DIFFICULTY_SETTINGS[currentDifficulty].label, 12, CANVAS_HEIGHT - 12);
+
+  // ★ 自機弾のエフェクトなどをさらに追加したい場合はここに描画処理を書いてください
+}
+
+// ★【今回追加】プレイヤーHPバーの描画（画面左上・現在HPの割合に応じて長さが変わる）
+function drawPlayerHpBar() {
+  const barX = 12;
+  const barY = 12;
+  const barWidth = 140;
+  const barHeight = 14;
+  const hpRatio = playerHP / PLAYER_MAX_HP;
+
+  // バーの背景（枠）
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.fillRect(barX, barY, barWidth, barHeight);
+
+  // 現在HPの割合ぶんだけ塗る。残りHPが少ないほど警告色（金→赤）に変える
+  let hpColor = COLOR_PLAYER;
+  if (hpRatio <= 0.3) {
+    hpColor = COLOR_BULLET; // 危険：赤
+  } else if (hpRatio <= 0.6) {
+    hpColor = COLOR_GOLD;   // 注意：金色
+  }
+  ctx.fillStyle = hpColor;
+  ctx.fillRect(barX, barY, barWidth * hpRatio, barHeight);
+
+  // バーの枠線
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+  // 現在HP / 最大HP を数値でも表示する
+  ctx.fillStyle = COLOR_TEXT;
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'left';
+  //ctx.fillText('HP ' + playerHP + ' / ' + PLAYER_MAX_HP, barX, barY + barHeight + 14);
+}
+
+// --- リザルト画面の描画 ---
+function drawResultScene() {
+  drawBackgroundGrid();
+
+  ctx.textAlign = 'center';
+
+  // クリア（ボス討伐）かゲームオーバー（HP切れ）かで見出しの文言・色を変える
+  if (resultReason === 'clear') {
+    ctx.fillStyle = COLOR_GOLD;
+    ctx.font = 'bold 34px sans-serif';
+    ctx.fillText('STAGE CLEAR!', CANVAS_WIDTH / 2, 260);
+  } else {
+    ctx.fillStyle = COLOR_BULLET;
+    ctx.font = 'bold 34px sans-serif';
+    ctx.fillText('GAME OVER', CANVAS_WIDTH / 2, 260);
+  }
+
+  // スコア表示
+  ctx.fillStyle = COLOR_TEXT;
+  ctx.font = '20px monospace';
+  ctx.fillText('SCORE : ' + score, CANVAS_WIDTH / 2, 310);
+
+  // タイトルに戻る案内（点滅）
+  if (Math.floor(blinkFrameCount / 30) % 2 === 0) {
+    ctx.fillStyle = COLOR_TEXT_SUB;
+    ctx.font = '16px monospace';
+    ctx.fillText('CLICK or PRESS SPACE TO TITLE', CANVAS_WIDTH / 2, 400);
+  }
+
+  ctx.textAlign = 'left';
+
+  // ★ ハイスコアの保存・表示などをしたい場合はここに追加する
+  //    （localStorageは環境によって使えない場合があるので、学習が進んだら挑戦してみましょう）
+}
+
+// 背景にうっすらグリッド線を引く共通処理（3つのシーン全てで使い回す）
+function drawBackgroundGrid() {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(79, 227, 255, 0.08)';
+  ctx.lineWidth = 1;
+
+  for (let x = 0; x <= CANVAS_WIDTH; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, CANVAS_HEIGHT);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= CANVAS_HEIGHT; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(CANVAS_WIDTH, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+
+/* ======================================================================
+   ⑦ メインループ（requestAnimationFrame）
+   ======================================================================
+   ブラウザの描画タイミングに合わせて「update() → draw()」を
+   繰り返し呼び出し続ける、ゲームの心臓部分です。
+====================================================================== */
+
+function gameLoop() {
+  update(); // 状態の更新
+  draw();   // 画面への描画
+
+  // 次のフレームでも gameLoop を呼んでもらうように予約する
+  // → これを繰り返すことで、ゲームが動き続ける
+  requestAnimationFrame(gameLoop);
+}
+
+
+/* ======================================================================
+   ⑧ イベント登録・ゲーム開始
+   ======================================================================
+   ページの読み込みが完了したら、初期化してループを開始する。
+====================================================================== */
+
+init();
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
